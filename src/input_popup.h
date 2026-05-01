@@ -126,5 +126,6 @@ class number_input_popup : public input_popup
         T old_value;
         std::optional<T> step_size = std::nullopt;
         std::optional<T> fast_step_size = std::nullopt;
+        int input_width;
 };
 #endif // CATA_SRC_INPUT_POPUP_H

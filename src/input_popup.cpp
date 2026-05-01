@@ -6,6 +6,7 @@
 #include "imgui/imgui.h"
 #include "imgui/imgui_stdlib.h"
 #include "input_enums.h"
+#include "output.h"
 #include "ret_val.h"
 #include "text.h"
 #include "translations.h"
@@ -78,12 +79,60 @@ bool input_popup::cancelled() const
 
 cataimgui::bounds input_popup::get_bounds()
 {
-    return {
-        pos.x < 0 ? -1.f : str_width_to_pixels( pos.x ),
-        pos.y < 0 ? -1.f : str_height_to_pixels( pos.y ),
-        width <= 0 ? -1.f : str_width_to_pixels( width ),
-        -1.f
-    };
+    const float pos_x = pos.x < 0 ? -1.f : str_width_to_pixels( pos.x );
+    const float pos_y = pos.y < 0 ? -1.f : str_height_to_pixels( pos.y );
+
+    ImGuiStyle &style = ImGui::GetStyle();
+
+    if( width > 0 ) {
+        float field_width = static_cast<float>( str_width_to_pixels( width ) );
+        float label_width = 0.f;
+        if( !label.empty() ) {
+            label_width = float( get_text_width( remove_color_tags( label ) ) );
+        }
+        const float content_width = label_width + field_width + ( label_width > 0.f ? style.ItemSpacing.x : 0.f );
+        const float input_height = ImGui::GetFrameHeightWithSpacing() + 4.0f; // extra padding
+        const float total_width = content_width + style.WindowPadding.x * 2.0f + style.FramePadding.x * 2.0f + style.WindowBorderSize * 2.0f;
+        const float total_height = input_height + style.WindowPadding.y * 2.0f + style.WindowBorderSize * 2.0f;
+        return { pos_x, pos_y, total_width, total_height };
+    }
+
+    std::string desc = remove_color_tags( description );
+    size_t offset = 0;
+    size_t pos_n = 0;
+    float max_description_width = 0.f;
+    int description_lines = 0;
+    if( !desc.empty() ) {
+        while( pos_n != std::string::npos ) {
+            pos_n = desc.find( '\n', offset );
+            std::string line = desc.substr( offset, pos_n == std::string::npos ? std::string::npos : pos_n - offset );
+            max_description_width = std::max( max_description_width, float( get_text_width( line ) ) );
+            ++description_lines;
+            offset = pos_n == std::string::npos ? std::string::npos : pos_n + 1;
+        }
+    }
+
+    float field_width = str_width_to_pixels( 10 );
+    if( max_input_length > 0 ) {
+        field_width = str_width_to_pixels( max_input_length + 1 );
+    }
+
+    float label_width = 0.f;
+    if( !label.empty() ) {
+        label_width = float( get_text_width( remove_color_tags( label ) ) );
+    }
+
+    const float content_width = std::max( max_description_width, label_width + field_width + ( label_width > 0.f ? style.ItemSpacing.x : 0.f ) );
+    if( content_width <= 0.0f ) {
+        return { pos_x, pos_y, -1.f, -1.f };
+    }
+
+    const float description_height = description_lines * ImGui::GetTextLineHeightWithSpacing();
+    const float input_height = ImGui::GetFrameHeightWithSpacing();
+    const float total_width = content_width + style.WindowPadding.x * 2.0f + style.FramePadding.x * 2.0f + style.WindowBorderSize * 2.0f;
+    const float total_height = description_height + input_height + ( description_lines > 0 ? style.ItemSpacing.y : 0.0f ) + style.WindowPadding.y * 2.0f + style.WindowBorderSize * 2.0f;
+
+    return { pos_x, pos_y, total_width, total_height };
 }
 
 void input_popup::draw_controls()
@@ -390,10 +439,14 @@ void string_input_popup_imgui::use_uilist_history( bool use_uilist )
 template<typename T>
 number_input_popup<T>::number_input_popup( int width, T old_value, const std::string &title,
         const point &pos, ImGuiWindowFlags flags ) :
-    input_popup( width, title, pos, flags ),
+    input_popup( width > 0 ? width : 0, width > 0 ? title : "", pos, flags ),
     value( old_value ),
-    old_value( old_value )
+    old_value( old_value ),
+    input_width( width )
 {
+    if( width == 0 ) {
+        set_description( title );
+    }
     // potentially register context keys
 }
 
@@ -402,6 +455,7 @@ void number_input_popup<int>::draw_input_control()
 {
     // todo: maybe set width of input field, default is fairly long
     // step size default values are imgui defaults
+    ImGui::SetNextItemWidth( input_width > 0 ? str_width_to_pixels( input_width ) : -1.f );
     ImGui::InputInt( "##number_input", &value, step_size.value_or( 1 ),
                      fast_step_size.value_or( 100 ) );
 }
@@ -411,6 +465,7 @@ void number_input_popup<float>::draw_input_control()
 {
     // todo: maybe set width of input field, default is fairly long
     // step size default values are imgui defaults
+    ImGui::SetNextItemWidth( input_width > 0 ? str_width_to_pixels( input_width ) : -1.f );
     cataimgui::InputFloat( "##number_input", &value, step_size.value_or( 0.f ),
                            fast_step_size.value_or( 0.f ) );
 }
@@ -430,11 +485,13 @@ T number_input_popup<T>::query()
         if( action == "TEXT.CONFIRM" ) {
             return value;
         } else if( action == "TEXT.QUIT" ) {
+            is_cancelled = true;
             break;
         }
 
         // mouse click on x to close leads here
         if( !get_is_open() ) {
+            is_cancelled = true;
             break;
         }
     }
